@@ -8,10 +8,13 @@ using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
+using UnityEngine.UIElements;
 using static Json_ZH;
+using Toggle = UnityEngine.UI.Toggle;
 
 /// <summary>
 /// 人工智能语音播放
@@ -23,9 +26,11 @@ public class ASR_ZH : MonoBehaviour
 
     [Header("ASR Toggle")]
     public Toggle _Toggle;
+    
+    public Text _Label;
 
-
-
+    public GameObject _LoadingBlock;
+    
     [Header("ASR Json")]
     private Root _JsonDataWeb;
 
@@ -95,6 +100,9 @@ public class ASR_ZH : MonoBehaviour
     //百度语音识别SDK
     private Asr _AipClient;
 
+    //重置中
+    private bool _isResetRecord = false;
+
     void Start()
     {
        // 创建SDK的实例
@@ -109,14 +117,25 @@ public class ASR_ZH : MonoBehaviour
 
     }
 
+    /// <summary>
+    /// 重置录音状态
+    /// </summary>
+    public void ResetRecord()
+    {
+        print("-------------重置状态-------------");
+        _isResetRecord = true;
+        _Label.text = "开始录音";
+        _Toggle.isOn = false;
+    }
 
     /// <summary>
     /// 点击按下说话开始录音
     /// </summary>
+    private int pressCount = 0;
     public void StartRecord()
     {
         //麦克风查询
-        if (Microphone.devices.Length > 0)
+        if (Microphone.devices.Length > 0 && pressCount != 0)
         {
             //麦克风获取
             string _Device = Microphone.devices[0];
@@ -128,11 +147,13 @@ public class ASR_ZH : MonoBehaviour
         }
         else
         {
-            _ASRText.text = "没有音频输入模块。";
+            _ASRText.text = "没有音频输入模块，请重新尝试";
 
             print("没有音频输入模块。");
-
+            ResetRecord();
         }
+
+        pressCount++;
     }
 
     /// <summary>
@@ -140,12 +161,16 @@ public class ASR_ZH : MonoBehaviour
     /// </summary>
     private void StopRecord()
     {
+        if (_isResetRecord)
+        {
+            _isResetRecord = false;
+            return;
+        }
+
         //麦克风停止响应
         Microphone.End(Microphone.devices[0]);
         //开始识别
         StartCoroutine(Recognition(_RecordClip));
-
-
     }
 
     /// <summary>
@@ -188,6 +213,11 @@ public class ASR_ZH : MonoBehaviour
     /// < returns ></ returns >
     private IEnumerator Recognition(AudioClip _Clip)
     {
+        SetBlock(true);
+
+        yield return null;
+        yield return null;
+        
         //开放 音频 长度
         float[] _Sample = new float[_Clip.samples];
 
@@ -203,15 +233,26 @@ public class ASR_ZH : MonoBehaviour
         }
         Buffer.BlockCopy(_IntData, 0, _ByteData, 0, _ByteData.Length);
 
-        //返回Json数据  （数据 格式 码率）
-        var _Result = _AipClient.Recognize(_ByteData, "pcm", 16000);
-
+        JObject _Result;
+        try
+        {
+            //返回Json数据  （数据 格式 码率）
+            _Result = _AipClient.Recognize(_ByteData, "pcm", 16000);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            SetBlock(false);
+            throw;
+        }
+        
         //获取Json 数据中的 讲话内容
         var _Speaking = _Result.GetValue("result");
 
         //检测是否有内容
         if (_Speaking == null)
         {
+            SetBlock(false);
             SetRecognizeText("没有录到声音");
             StopAllCoroutines();
             yield return null;
@@ -236,12 +277,14 @@ public class ASR_ZH : MonoBehaviour
         if (_ToggleASR.isOn)
         {
             print("-------------开始录音-------------");
+            _Label.text = "停止录音";
             //开始识别
             StartRecord();
         }
         else
         {
             print("-------------停止录音-------------");
+            _Label.text = "开始录音";
             //停止录音
             StopRecord();
         }
@@ -257,6 +300,8 @@ public class ASR_ZH : MonoBehaviour
 
         //欧拉米返回Json数据
         string _OLAMIStr = GetRecognitionResult(NluApiSample.API_NAME_NLI, _ASRText);
+        
+        SetBlock(false);
 
         //Json 数据WebGL 数据加载
         //Json 数据类 创建
@@ -914,15 +959,30 @@ public class ASR_ZH : MonoBehaviour
                         { "rq", "{\"data_type\":\"stt\", \"data\":{\"input_type\":1,\"text\":\"" + _InputText + "\"}}" }
                     };
             }
-            //获取网页数据
-            byte[] _Response = _Client.UploadValues(_ApiBaseUrl, _ApiParam);
-            //byte 数组 转换为 文字
-            _Result = Encoding.UTF8.GetString(_Response);
+
+            try
+            {
+                //获取网页数据
+                byte[] _Response = _Client.UploadValues(_ApiBaseUrl, _ApiParam);
+                //byte 数组 转换为 文字
+                _Result = Encoding.UTF8.GetString(_Response);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                SetBlock(false);
+                throw;
+            }
         }
 
         print(_Result);
         //返回欧拉密 Json 数据
         return _Result;     
+    }
+
+    private void SetBlock(bool enable)
+    {
+        _LoadingBlock.gameObject.SetActive(enable);
     }
 
     #region 百度令牌访问弃用
