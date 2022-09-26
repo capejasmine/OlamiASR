@@ -1,0 +1,8 @@
+Temp/
+Library/
+obj/
+Assembly-CSharp.csproj
+Assembly-CSharp-Editor.csproj
+.DS_Store
+Logs
+.idea
